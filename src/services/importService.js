@@ -37,29 +37,34 @@ export const importService = {
 
   async procesarDatos(data) {
     const provincias = new Map();
+    const distritos = new Map();
     const escuelas = new Map();
     const profesores = [];
     let errores = [];
 
+    // Saltar fila de encabezados
     for (let i = 1; i < data.length; i++) {
       const fila = data[i];
       
-      if (!fila || fila.length < 6) {
+      if (!fila || fila.length < 8) {
         errores.push(`Fila ${i + 1}: Datos incompletos`);
         continue;
       }
 
       const [
         provinciaNombre,
+        distritoNombre,
         escuelaNombre,
         latitud,
         longitud,
         profesorNombre,
-        profesorCorreo
+        profesorCorreo,
+        identificador
       ] = fila;
 
       try {
-        if (!provinciaNombre || !escuelaNombre || !profesorNombre || !profesorCorreo) {
+        // Validaciones
+        if (!provinciaNombre || !distritoNombre || !escuelaNombre || !profesorNombre || !profesorCorreo || !identificador) {
           errores.push(`Fila ${i + 1}: Faltan datos obligatorios`);
           continue;
         }
@@ -74,9 +79,18 @@ export const importService = {
           continue;
         }
 
-        const provinciaNormalizada = provinciaNombre.trim().toUpperCase();
-        const provinciaId = this.normalizarId(provinciaNormalizada);
+        if (String(identificador).length !== 8 || isNaN(identificador)) {
+          errores.push(`Fila ${i + 1}: Identificador debe ser 8 números`);
+          continue;
+        }
 
+        // Normalizar nombres
+        const provinciaNormalizada = provinciaNombre.trim().toUpperCase();
+        const distritoNormalizado = distritoNombre.trim();
+        const provinciaId = this.normalizarId(provinciaNormalizada);
+        const distritoId = this.normalizarId(`${provinciaId}-${distritoNormalizado}`);
+
+        // Guardar provincia
         if (!provincias.has(provinciaId)) {
           provincias.set(provinciaId, {
             id: provinciaId,
@@ -84,12 +98,24 @@ export const importService = {
           });
         }
 
-        const escuelaId = this.normalizarId(`${provinciaId}-${escuelaNombre}`);
+        // Guardar distrito
+        if (!distritos.has(distritoId)) {
+          distritos.set(distritoId, {
+            id: distritoId,
+            nombre: distritoNormalizado,
+            provinciaId: provinciaId,
+            provinciaNombre: provinciaNormalizada
+          });
+        }
 
+        // Guardar escuela
+        const escuelaId = this.normalizarId(`${distritoId}-${escuelaNombre}`);
         if (!escuelas.has(escuelaId)) {
           escuelas.set(escuelaId, {
             id: escuelaId,
             nombre: escuelaNombre.trim(),
+            distritoId: distritoId,
+            distritoNombre: distritoNormalizado,
             provinciaId: provinciaId,
             provinciaNombre: provinciaNormalizada,
             coordenadas: {
@@ -100,14 +126,20 @@ export const importService = {
           });
         }
 
+        // Guardar profesor
         profesores.push({
+          id: this.normalizarId(profesorCorreo),
           nombre: profesorNombre.trim(),
           email: profesorCorreo.trim().toLowerCase(),
+          identificador: String(identificador),
           escuelaId: escuelaId,
           escuelaNombre: escuelaNombre.trim(),
+          distritoId: distritoId,
+          distritoNombre: distritoNormalizado,
           provinciaId: provinciaId,
           provinciaNombre: provinciaNormalizada,
-          activo: true
+          activo: true,
+          fotoReferencia: null // Se sube después manualmente
         });
 
       } catch (error) {
@@ -115,10 +147,13 @@ export const importService = {
       }
     }
 
+    // Guardar en Firestore
     let provinciasCargadas = 0;
+    let distritosCargados = 0;
     let escuelasCargadas = 0;
     let profesoresCargados = 0;
 
+    // Provincias
     for (const [id, provincia] of provincias) {
       try {
         await setDoc(doc(db, 'provincias', id), {
@@ -127,10 +162,24 @@ export const importService = {
         });
         provinciasCargadas++;
       } catch (error) {
-        errores.push(`Error guardando provincia ${provincia.nombre}: ${error.message}`);
+        errores.push(`Error provincia ${provincia.nombre}: ${error.message}`);
       }
     }
 
+    // Distritos
+    for (const [id, distrito] of distritos) {
+      try {
+        await setDoc(doc(db, 'distritos', id), {
+          ...distrito,
+          createdAt: serverTimestamp()
+        });
+        distritosCargados++;
+      } catch (error) {
+        errores.push(`Error distrito ${distrito.nombre}: ${error.message}`);
+      }
+    }
+
+    // Escuelas
     for (const [id, escuela] of escuelas) {
       try {
         await setDoc(doc(db, 'escuelas', id), {
@@ -139,20 +188,20 @@ export const importService = {
         });
         escuelasCargadas++;
       } catch (error) {
-        errores.push(`Error guardando escuela ${escuela.nombre}: ${error.message}`);
+        errores.push(`Error escuela ${escuela.nombre}: ${error.message}`);
       }
     }
 
+    // Profesores
     for (const profesor of profesores) {
       try {
-        const profesorId = this.normalizarId(profesor.email);
-        await setDoc(doc(db, 'profesores', profesorId), {
+        await setDoc(doc(db, 'profesores', profesor.id), {
           ...profesor,
           createdAt: serverTimestamp()
         });
         profesoresCargados++;
       } catch (error) {
-        errores.push(`Error guardando profesor ${profesor.nombre}: ${error.message}`);
+        errores.push(`Error profesor ${profesor.nombre}: ${error.message}`);
       }
     }
 
@@ -160,6 +209,7 @@ export const importService = {
       exito: true,
       resumen: {
         provinciasCargadas,
+        distritosCargados,
         escuelasCargadas,
         profesoresCargados,
         errores: errores.length
@@ -184,17 +234,30 @@ export const importService = {
 
   generarPlantilla() {
     const datos = [
-      ['provincia', 'nombreEscuela', 'latitudEscuela', 'longitudEscuela', 'nombreProfesor', 'correoProfesor'],
-      ['CORONEL PORTILLO', 'I.E. San Juan Bautista', '-8.3791', '-74.5539', 'Juan Pérez García', 'juan.perez@email.com'],
-      ['CORONEL PORTILLO', 'I.E. San Juan Bautista', '-8.3791', '-74.5539', 'María López Torres', 'maria.lopez@email.com'],
-      ['PADRE ABAD', 'I.E. José Carlos Mariátegui', '-8.8543', '-75.5122', 'Carlos Ramírez Díaz', 'carlos.ramirez@email.com'],
+      ['provincia', 'distrito', 'nombreEscuela', 'latitudEscuela', 'longitudEscuela', 'nombreProfesor', 'correoProfesor', 'identificador'],
+      ['CORONEL PORTILLO', 'Callería', 'I.E. San Juan Bautista', -8.3791, -74.5539, 'Juan Pérez García', 'juan.perez@email.com', '12345678'],
+      ['CORONEL PORTILLO', 'Callería', 'I.E. San Juan Bautista', -8.3791, -74.5539, 'María López Torres', 'maria.lopez@email.com', '87654321'],
+      ['CORONEL PORTILLO', 'Yarinacocha', 'I.E. José Olaya', -8.3502, -74.5726, 'Carlos Ramírez Díaz', 'carlos.ramirez@email.com', '11223344'],
     ];
 
     const ws = XLSX.utils.aoa_to_sheet(datos);
+    
+    // Ajustar anchos de columna
+    ws['!cols'] = [
+      { wch: 18 }, // provincia
+      { wch: 15 }, // distrito
+      { wch: 25 }, // nombreEscuela
+      { wch: 15 }, // latitud
+      { wch: 15 }, // longitud
+      { wch: 25 }, // nombreProfesor
+      { wch: 30 }, // correoProfesor
+      { wch: 12 }  // identificador
+    ];
+
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Profesores');
     
-    XLSX.writeFile(wb, 'plantilla_profesores_controldocente.xlsx');
+    XLSX.writeFile(wb, 'plantilla_controldocente_ucayali.xlsx');
   }
 };
 
