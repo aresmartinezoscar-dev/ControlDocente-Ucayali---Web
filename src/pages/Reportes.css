@@ -1,0 +1,56 @@
+.reportes-page {
+  padding: 20px;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+
+.page-header button {
+  padding: 10px 20px;
+  background: #3498db;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.sin-reportes {
+  text-align: center;
+  padding: 60px;
+  font-size: 18px;
+  color: #27ae60;
+}
+
+.tabla-reportes {
+  width: 100%;
+  background: white;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.tabla-reportes thead {
+  background: #f8f9fa;
+}
+
+.tabla-reportes th, .tabla-reportes td {
+  padding: 12px;
+  text-align: left;
+}
+
+.tabla-reportes button {
+  padding: 6px 12px;
+  background: #27ae60;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.tabla-reportes button:hover {
+  background: #229954;
+}
